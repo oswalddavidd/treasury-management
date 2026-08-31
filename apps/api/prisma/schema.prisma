@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Reference data
+// ---------------------------------------------------------------------------
+
+model Coin {
+  id          String  @id // e.g. "BTC" — also the symbol
+  displayName String
+  decimals    Int // display/quantity scale for this coin, e.g. 8 for BTC, 18 for ETH
+  isActive    Boolean @default(true)
+
+  // Actual observed balance at the LP/custody gate — independently set, NOT
+  // derived from the ledger. freeFloat is what the ledger says *should* be
+  // available; gateBalance is what's *actually* sitting there. A mismatch
+  // means the computed free float isn't backed by real assets in place.
+  gateBalance Decimal @default(0) @db.Decimal(38, 18)
+
+  ledgerEvents     LedgerEvent[]
+  snapshotBalances SnapshotCoinBalance[]
+  lpCoverage       LpCoinCoverage[]
+
+  @@map("coins")
+}
+
+model User {
+  id    String  @id @default(cuid())
+  label String?
+
+  ledgerEvents LedgerEvent[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Ledger — append-only. Never updated or deleted; corrections are new events.
+// `seq` is the monotonic commit order used for the period-boundary rule
+// (§1.3: boundary is ledger state as of the last event strictly before the
+// next period's start instant). `occurredAt` is the simulated wall-clock
+// time for display only and must never be used to determine ordering.
+// ---------------------------------------------------------------------------
+
+enum LedgerEventType {
+  DEPOSIT_IDR
+  WITHDRAW_IDR
+  DEPOSIT_COIN
+  WITHDRAW_COIN
+  BUY // IDR -> coin, via a specific LP (assigned at order time)
+  SELL // coin -> IDR
+}
+
+model LedgerEvent {
+  id   String          @id @default(cuid())
+  seq  BigInt          @unique @default(autoincrement())
+  type LedgerEventType
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  coinId String?
+  coin   Coin?   @relation(fields: [coinId], references: [id])
+
+  idrAmount  Decimal? @db.Decimal(30, 8) // IDR side of the event, when applicable
+  coinAmount Decimal? @db.Decimal(38, 18) // coin side of the event, when applicable
+
+  // Trade price at execution time, IDR per 1 unit of coin. Set for BUY/SELL only.
+  priceIdrPerCoin Decimal? @db.Decimal(30, 8)
+
+  // LP the trade was assigned to at order time (BUY only — assignment is a
+  // locked commitment against usdt_allocated, not a projection).
+  lpId String?
+  lp   LpProvider? @relation(fields: [lpId], references: [id])
+
+  occurredAt DateTime // simulated clock time — display/audit only, not ordering
+  createdAt  DateTime @default(now()) // real wall-clock insert time, for debugging
+
+  @@index([coinId, seq])
+  @@index([type, seq])
+  @@map("ledger_events")
+}
+
+// ---------------------------------------------------------------------------
+// Period snapshots — frozen basis for the *next* period (§1.3). Written once,
+// atomically, at period close. Never updated after creation.
+// ---------------------------------------------------------------------------
+
+model PeriodSnapshot {
+  id String @id @default(cuid())
+
+  // Period start instant this snapshot governs (00:00:00 or 12:00:00 Asia/Jakarta).
+  effectiveFrom DateTime @unique
+  effectiveTo   DateTime
+
+  // Last ledger seq included in this snapshot (strictly before effectiveFrom).
+  seqBoundary BigInt
+
+  bbIdr Decimal @db.Decimal(30, 8) // total user IDR holdings at snapshot instant
+
+  createdAt DateTime @default(now())
+
+  coinBalances SnapshotCoinBalance[]
+
+  @@map("period_snapshots")
+}
+
+model SnapshotCoinBalance {
+  id String @id @default(cuid())
+
+  snapshotId String
+  snapshot   PeriodSnapshot @relation(fields: [snapshotId], references: [id])
+
+  coinId String
+  coin   Coin   @relation(fields: [coinId], references: [id])
+
+  bbAmount Decimal @db.Decimal(38, 18) // total user holdings of this coin at snapshot instant
+
+  @@unique([snapshotId, coinId])
+  @@map("snapshot_coin_balances")
+}
+
+// ---------------------------------------------------------------------------
+// Liquidity providers — real-time state, mutated by both direct sim writes
+// (Set LP state) and buy-order execution (usdtAllocated increments on BUY).
+// ---------------------------------------------------------------------------
+
+model LpProvider {
+  id   String @id @default(cuid())
+  name String @unique
+
+  usdtHeld      Decimal @default(0) @db.Decimal(30, 8)
+  usdtAllocated Decimal @default(0) @db.Decimal(30, 8)
+
+  coverage LpCoinCoverage[]
+  trades   LedgerEvent[]
+
+  @@map("lp_providers")
+}
+
+model LpCoinCoverage {
+  id String @id @default(cuid())
+
+  lpId String
+  lp   LpProvider @relation(fields: [lpId], references: [id])
+
+  coinId String
+  coin   Coin   @relation(fields: [coinId], references: [id])
+
+  @@unique([lpId, coinId])
+  @@map("lp_coin_coverage")
+}
+
+// ---------------------------------------------------------------------------
+// FX — append-only, same ordering discipline as the ledger. Current rate is
+// the latest row by seq.
+// ---------------------------------------------------------------------------
+
+model FxRateEvent {
+  id  String @id @default(cuid())
+  seq BigInt @unique @default(autoincrement())
+
+  rateIdrPerUsd Decimal @db.Decimal(20, 4)
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@map("fx_rate_events")
+}
+
+// ---------------------------------------------------------------------------
+// Simulator clock — singleton row. Only meaningful when SIM is enabled;
+// the injectable Clock reads this in dev, RealClock ignores it in prod.
+// ---------------------------------------------------------------------------
+
+model SimClockState {
+  id           Int      @id @default(1)
+  simulatedNow DateTime
+
+  @@map("sim_clock_state")
+}
+
+// ---------------------------------------------------------------------------
+// Telegram alerting — tracks the most severe band already alerted for a
+// coin *within the current period*, so alerting is edge-triggered (fires
+// only on a transition to a worse band) rather than level-triggered (which
+// would spam on every tick a threshold is crossed). Keyed to
+// periodEffectiveFrom so a new period naturally resets the dedupe — a
+// fresh period means a fresh peak, and re-alerting is fair game.
+// ---------------------------------------------------------------------------
+
+model CoinAlertState {
+  coinId              String   @id
+  lastAlertedBand     String // StatusBand — NORMAL/WATCH/ALERT/CRITICAL/HALTED
+  periodEffectiveFrom DateTime
+  updatedAt           DateTime @updatedAt
+
+  @@map("coin_alert_state")
+}

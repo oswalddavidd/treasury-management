@@ -1,0 +1,15 @@
+{
+  "name": "coinbit-buffers",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @coinbit/api dev",
+    "dev:web": "pnpm --filter @coinbit/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
