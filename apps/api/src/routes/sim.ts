@@ -12,6 +12,7 @@ import { setLpState } from "../lp/store.js";
 import { closePeriod, PeriodAlreadyClosedError } from "../snapshot/periodClose.js";
 import { notifyBufferStateChanged } from "../events.js";
 import { setGateBalance } from "../gate/store.js";
+import { getIdrVaultState, setWithdrawalVault } from "../idrVault/store.js";
 import { DEFAULT_COINS } from "../sim/coins.js";
 
 const decimalString = z.string().refine((v) => !new Decimal(v).isNaN(), "must be a decimal number");
@@ -55,6 +56,7 @@ const lpSchema = z.object({
   coverage: z.array(z.string().min(1)),
 });
 const gateAssetSchema = z.object({ coinId: z.string().min(1), amount: decimalString });
+const withdrawalVaultSchema = z.object({ amount: decimalString });
 const scenarioParamsSchema = z.object({
   name: z.enum([
     "zero-balance",
@@ -90,7 +92,8 @@ export function registerSimRoutes(
     // Read from the DB, not the static DEFAULT_COINS constant — this is
     // what makes gateBalance visible/current in the sim UI.
     const coins = await prisma.coin.findMany({ where: { isActive: true } });
-    return { now, period, recentEvents, coins };
+    const idrVaults = await getIdrVaultState(prisma);
+    return { now, period, recentEvents, coins, idrVaults };
   });
 
   app.post("/api/sim/deposit-idr", async (request) => {
@@ -201,6 +204,16 @@ export function registerSimRoutes(
   app.post("/api/sim/gate-assets", async (request) => {
     const body = gateAssetSchema.parse(request.body);
     return setGateBalance(prisma, body.coinId, new Decimal(body.amount));
+  });
+
+  // Manual override for the IDR-side counterpart of gate assets — same
+  // testing purpose: deliberately create (or clear) a mismatch against the
+  // computed FF_idr, independent of the real deposit/withdraw/rebalance
+  // mechanics.
+  app.post("/api/sim/withdrawal-vault", async (request) => {
+    const body = withdrawalVaultSchema.parse(request.body);
+    await setWithdrawalVault(prisma, new Decimal(body.amount));
+    return { withdrawalVault: body.amount };
   });
 
   app.post<{ Params: { name: string } }>("/api/sim/scenario/:name", async (request) => {

@@ -3,6 +3,7 @@ import Decimal from "decimal.js";
 import { prisma } from "../../db.js";
 import { appendLedgerEvent } from "../../ledger/store.js";
 import { SimClock } from "../../clock/simClock.js";
+import { getIdrVaultState } from "../../idrVault/store.js";
 import {
   closePeriod,
   getActiveSnapshot,
@@ -17,6 +18,7 @@ async function resetDb() {
   await prisma.lpCoinCoverage.deleteMany();
   await prisma.lpProvider.deleteMany();
   await prisma.fxRateEvent.deleteMany();
+  await prisma.idrVaultState.deleteMany();
   await prisma.simClockState.deleteMany();
   await prisma.coin.deleteMany();
   await prisma.user.deleteMany();
@@ -103,6 +105,36 @@ describe("closePeriod", () => {
 
     const coin = await prisma.coin.findUniqueOrThrow({ where: { id: "BTC" } });
     expect(new Decimal(coin.gateBalance.toString()).toString()).toBe("30");
+  });
+
+  it("rebalances the IDR vaults exactly like the worked example: deposit 100,000, buy 50,000, close -> withdrawal vault = 20% of the remaining 50,000", async () => {
+    const clock = new SimClock(new Date("2026-08-26T17:00:00.000Z"));
+
+    await appendLedgerEvent(prisma, {
+      type: "DEPOSIT_IDR",
+      userId: "user-1",
+      idrAmount: new Decimal(100_000),
+      occurredAt: clock.now(),
+    });
+    await appendLedgerEvent(prisma, {
+      type: "BUY",
+      userId: "user-1",
+      coinId: "BTC",
+      idrAmount: new Decimal(50_000),
+      coinAmount: new Decimal(1),
+      priceIdrPerCoin: new Decimal(50_000),
+      occurredAt: clock.now(),
+    });
+
+    // Deposit Vault should hold the full deposit, untouched by the buy
+    const midPeriod = await getIdrVaultState(prisma);
+    expect(midPeriod.depositVault.toString()).toBe("100000");
+
+    await closePeriod(prisma, clock);
+
+    const afterClose = await getIdrVaultState(prisma);
+    expect(afterClose.withdrawalVault.toString()).toBe("10000"); // 20% of BB_idr=50,000
+    expect(afterClose.depositVault.toString()).toBe("0"); // reset, scoped to the period that just ended
   });
 
   it("refuses to close the same period twice without the clock advancing", async () => {

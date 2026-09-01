@@ -96,6 +96,10 @@ export function useSetGateAsset() {
   );
 }
 
+export function useSetWithdrawalVault() {
+  return useSimMutation((input: { amount: string }) => apiPost("/api/sim/withdrawal-vault", input));
+}
+
 export function useSeedScenario() {
   return useSimMutation((name: string) => apiPost(`/api/sim/scenario/${name}`));
 }

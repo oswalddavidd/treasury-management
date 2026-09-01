@@ -1,33 +1,20 @@
 import { useMemo, useState } from "react";
 import type { BufferStateDTO, CoinBufferStateDTO, StatusBand } from "../../api/buffersTypes.js";
-import type { ConsumptionPoint } from "../../api/useBuffersStream.js";
-import { formatCoinAmount, formatPct, formatUsdt } from "../../lib/format.js";
+import { formatCoinAmount, formatPct } from "../../lib/format.js";
 import { BAND_TEXT_COLOR, BufferGauge } from "./BufferGauge.js";
-import { Sparkline } from "./Sparkline.js";
 import { BandCounts } from "./BandCounts.js";
 
 type FilterChip = "worst6" | "alertPlus" | "all";
 
 const ALERT_PLUS: StatusBand[] = ["HALTED", "CRITICAL", "ALERT"];
 
-export function SellSideTable({
-  state,
-  history,
-}: {
-  state: BufferStateDTO;
-  history: Record<string, ConsumptionPoint[]>;
-}) {
+export function SellSideTable({ state }: { state: BufferStateDTO }) {
   const [chip, setChip] = useState<FilterChip>("all");
   const [bandFilter, setBandFilter] = useState<StatusBand | null>(null);
 
   const sorted = useMemo(
     () => [...state.coinStates].sort((a, b) => Number(b.peak) - Number(a.peak)),
     [state.coinStates],
-  );
-
-  const capacityByCoin = useMemo(
-    () => new Map(state.coinCapacities.map((c) => [c.coinId, c])),
-    [state.coinCapacities],
   );
 
   const rows = useMemo(() => {
@@ -71,8 +58,6 @@ export function SellSideTable({
               <th className="py-1.5 pr-3 font-normal">Free float</th>
               <th className="py-1.5 pr-3 font-normal">Net sell</th>
               <th className="py-1.5 pr-3 font-normal">Consumed</th>
-              <th className="py-1.5 pr-3 font-normal">Trend</th>
-              <th className="py-1.5 pr-3 font-normal">Buy capacity</th>
               <th className="py-1.5 pr-3 font-normal">Status</th>
             </tr>
           </thead>
@@ -87,7 +72,6 @@ export function SellSideTable({
               const rawConsumed = coin.consumed === null ? null : Number(coin.consumed);
               const clampedConsumed = rawConsumed === null ? null : Math.max(0, rawConsumed);
               const isNetBuying = rawNetSell < 0;
-              const capacity = capacityByCoin.get(coin.coinId);
 
               return (
                 <tr key={coin.coinId} className="border-t border-neutral-800">
@@ -125,36 +109,13 @@ export function SellSideTable({
                       <span className="tabular-nums text-neutral-300">{formatPct(clampedConsumed)}</span>
                     </div>
                   </td>
-                  <td className="py-2 pr-3">
-                    <Sparkline points={history[coin.coinId] ?? []} />
-                  </td>
-                  <td className="py-2 pr-3 tabular-nums">
-                    {capacity ? (
-                      <span
-                        className={
-                          capacity.buyBlocked
-                            ? "text-red-400"
-                            : capacity.singleSource
-                              ? "text-amber-400"
-                              : "text-neutral-400"
-                        }
-                        title={capacity.singleSource ? "Single-source LP — concentration risk" : undefined}
-                      >
-                        {formatUsdt(capacity.capacityUsdt)}
-                        {capacity.buyBlocked && " · blocked"}
-                        {!capacity.buyBlocked && capacity.singleSource && " · 1 LP"}
-                      </span>
-                    ) : (
-                      <span className="text-neutral-600">—</span>
-                    )}
-                  </td>
                   <td className={`py-2 pr-3 font-medium ${BAND_TEXT_COLOR[coin.band]}`}>{coin.band}</td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-4 text-center text-neutral-500">
+                <td colSpan={6} className="py-4 text-center text-neutral-500">
                   No coins match this filter.
                 </td>
               </tr>

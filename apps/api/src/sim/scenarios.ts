@@ -26,6 +26,7 @@ export async function resetAll(prisma: PrismaClient, clock: SimClock, resetTime:
   await prisma.lpCoinCoverage.deleteMany();
   await prisma.lpProvider.deleteMany();
   await prisma.fxRateEvent.deleteMany();
+  await prisma.idrVaultState.deleteMany();
   await prisma.coin.deleteMany();
   await prisma.user.deleteMany();
 

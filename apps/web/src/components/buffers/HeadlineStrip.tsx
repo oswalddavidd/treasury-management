@@ -12,9 +12,14 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function HeadlineStrip({ state, now }: { state: BufferStateDTO; now: Date }) {
+export function HeadlineStrip({ state }: { state: BufferStateDTO }) {
   const period = state.period!;
-  const remainingMs = new Date(period.end).getTime() - now.getTime();
+  // Derived from the backend's own clock (state.now), never the browser's —
+  // this is a simulated clock that only moves when something on /sim
+  // explicitly advances it. A client-side setInterval ticking real seconds
+  // would show a countdown that looks alive but is disconnected from
+  // whether the period is actually approaching its end.
+  const remainingMs = new Date(period.end).getTime() - new Date(state.now).getTime();
   const worstCoin = state.coinStates.find((c) => c.coinId === state.rollup.worstCoin);
   const blockedCount = state.coinCapacities.filter((c) => c.buyBlocked).length;
   const attentionCount = state.rollup.bandCounts.HALTED + state.rollup.bandCounts.CRITICAL;

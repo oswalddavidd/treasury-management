@@ -25,11 +25,17 @@ export interface LedgerEventDTO {
   createdAt: string;
 }
 
+export interface IdrVaultsDTO {
+  depositVault: string;
+  withdrawalVault: string;
+}
+
 export interface SimStateDTO {
   now: string;
   period: PeriodDTO;
   recentEvents: LedgerEventDTO[];
   coins: CoinDTO[];
+  idrVaults: IdrVaultsDTO;
 }
 
 export interface LpProviderDTO {

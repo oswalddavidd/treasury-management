@@ -1,8 +1,9 @@
-import { computeCoinFreeFloat } from "@coinbit/shared";
+import { computeCoinFreeFloat, computeIdrFreeFloat } from "@coinbit/shared";
 import type { PrismaClient } from "../../prisma/generated/client/index.js";
 import type { Clock } from "../clock/types.js";
 import { nextPeriod, periodFor } from "../domain/period.js";
 import { getCoinBalance, getIdrBalance, getLatestSeq } from "../ledger/store.js";
+import { rebalanceIdrVaults } from "../idrVault/store.js";
 import { notifyBufferStateChanged } from "../events.js";
 
 export class PeriodAlreadyClosedError extends Error {
@@ -50,6 +51,13 @@ export async function closePeriod(prisma: PrismaClient, clock: Clock) {
         bbIdr: bbIdr.toString(),
       },
     });
+
+    // IDR side of rebalancing: Withdrawal Vault hard-resets to the newly-
+    // computed FF_idr (same treatment as Gate Assets for crypto); Deposit
+    // Vault resets to 0 — it's scoped to "this period's incoming deposits"
+    // and feeds nothing else.
+    const newFfIdr = computeIdrFreeFloat(bbIdr);
+    await rebalanceIdrVaults(tx, newFfIdr);
 
     for (const coin of coins) {
       const bb = await getCoinBalance(tx, coin.id, seqBoundary);

@@ -4,6 +4,7 @@ import { TradeActionsPanel } from "../components/sim/TradeActionsPanel.js";
 import { BulkGeneratorPanel } from "../components/sim/BulkGeneratorPanel.js";
 import { LpFxPanel } from "../components/sim/LpFxPanel.js";
 import { GateAssetsPanel } from "../components/sim/GateAssetsPanel.js";
+import { WithdrawalVaultPanel } from "../components/sim/WithdrawalVaultPanel.js";
 import { ScenariosPanel } from "../components/sim/ScenariosPanel.js";
 import { EventLogPanel } from "../components/sim/EventLogPanel.js";
 
@@ -30,6 +31,7 @@ export default function SimulatorPage() {
           <BulkGeneratorPanel />
           <LpFxPanel coins={data.coins} />
           <GateAssetsPanel coins={data.coins} />
+          <WithdrawalVaultPanel idrVaults={data.idrVaults} />
           <ScenariosPanel />
           <EventLogPanel events={data.recentEvents} />
         </div>

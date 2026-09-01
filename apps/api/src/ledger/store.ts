@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { Prisma, type PrismaClient } from "../../prisma/generated/client/index.js";
 import type { LedgerEventType } from "../../prisma/generated/client/index.js";
 import { notifyBufferStateChanged } from "../events.js";
+import { decrementWithdrawalVault, incrementDepositVault } from "../idrVault/store.js";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -32,14 +33,30 @@ export async function appendLedgerEvent(db: Db, input: AppendLedgerEventInput) {
   });
 
   // A BUY means Coinbit acquires that crypto to fulfill it — the gate's
-  // actual holdings grow in real time as buys land, independent of the
-  // frozen free float. Resets to the newly-computed free float at every
-  // rebalancing (period close) — see closePeriod.
+  // actual holdings grow in real time as buys land. A SELL draws down the
+  // same gate capacity in the other direction — symmetric to how headroom
+  // depletes on the free-float side. Both are independent of the frozen
+  // free float itself; the gate resets to the newly-computed free float at
+  // every rebalancing (period close) — see closePeriod.
   if (input.type === "BUY" && input.coinId && input.coinAmount) {
     await db.coin.update({
       where: { id: input.coinId },
       data: { gateBalance: { increment: input.coinAmount.toString() } },
     });
+  } else if (input.type === "SELL" && input.coinId && input.coinAmount) {
+    await db.coin.update({
+      where: { id: input.coinId },
+      data: { gateBalance: { decrement: input.coinAmount.toString() } },
+    });
+  }
+
+  // Deposit Vault: real-time, full amount, purely observational (see
+  // idrVault/store.ts) — never affects any formula. Withdrawal Vault: real-
+  // time deduction only; it's otherwise only ever set at rebalancing.
+  if (input.type === "DEPOSIT_IDR" && input.idrAmount) {
+    await incrementDepositVault(db, input.idrAmount);
+  } else if (input.type === "WITHDRAW_IDR" && input.idrAmount) {
+    await decrementWithdrawalVault(db, input.idrAmount);
   }
 
   notifyBufferStateChanged();

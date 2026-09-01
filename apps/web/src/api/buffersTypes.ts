@@ -65,4 +65,11 @@ export interface BufferStateDTO {
   reserveCoverage: string | null;
   fxRate?: string | null;
   reason?: string;
+  // Deposit Vault: real-time, this period's raw deposits, purely
+  // observational — feeds no formula. Withdrawal Vault: the IDR
+  // counterpart of Gate Assets, reset to FF_idr at every rebalancing,
+  // drawn down in real time only by withdrawals.
+  depositVault: string;
+  withdrawalVault: string;
+  withdrawalVaultMismatch: boolean | null;
 }

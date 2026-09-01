@@ -24,6 +24,7 @@ import {
 } from "../ledger/store.js";
 import { getLatestFxRate } from "../fx/store.js";
 import { listLps } from "../lp/store.js";
+import { getIdrVaultState } from "../idrVault/store.js";
 import { getActiveSnapshot, getRecentClosedPeriodWindows } from "../snapshot/periodClose.js";
 
 /**
@@ -50,6 +51,9 @@ export interface BufferSnapshotResult {
   lpStates: LpBufferState[];
   reserveCoverage: null;
   reason: "no-snapshot-yet";
+  depositVault: Decimal;
+  withdrawalVault: Decimal;
+  withdrawalVaultMismatch: null;
 }
 
 export interface BufferComputedResult {
@@ -63,6 +67,14 @@ export interface BufferComputedResult {
   lpStates: LpBufferState[];
   reserveCoverage: Decimal | null;
   fxRate: Decimal | null;
+  // Deposit Vault: real-time, this period's raw deposits, purely
+  // observational. Withdrawal Vault: the IDR counterpart of Gate Assets —
+  // reset to FF_idr at every rebalancing, drawn down in real time only by
+  // withdrawals. Mismatch flags when it's drifted from Ceiling_idr (=
+  // FF_idr), same reconciliation idea as gateMismatch.
+  depositVault: Decimal;
+  withdrawalVault: Decimal;
+  withdrawalVaultMismatch: boolean;
 }
 
 /**
@@ -76,6 +88,7 @@ export async function computeCurrentBufferState(
   const now = clock.now();
   const activeSnapshot = await getActiveSnapshot(prisma, now);
   const lps = await listLps(prisma);
+  const idrVaults = await getIdrVaultState(prisma);
   const lpStates = lps.map((lp) =>
     computeLpBufferState({
       lpId: lp.id,
@@ -101,6 +114,9 @@ export async function computeCurrentBufferState(
       lpStates,
       reserveCoverage: null,
       reason: "no-snapshot-yet",
+      depositVault: idrVaults.depositVault,
+      withdrawalVault: idrVaults.withdrawalVault,
+      withdrawalVaultMismatch: null,
     };
   }
 
@@ -199,5 +215,8 @@ export async function computeCurrentBufferState(
     lpStates,
     reserveCoverage: launch.reserveCoverage,
     fxRate,
+    depositVault: idrVaults.depositVault,
+    withdrawalVault: idrVaults.withdrawalVault,
+    withdrawalVaultMismatch: !idrVaults.withdrawalVault.equals(ceilingIdr),
   };
 }

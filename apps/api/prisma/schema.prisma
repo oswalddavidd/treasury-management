@@ -203,3 +203,20 @@ model CoinAlertState {
 
   @@map("coin_alert_state")
 }
+
+// ---------------------------------------------------------------------------
+// IDR vaults — the Withdrawal Vault is the IDR-side counterpart of
+// Coin.gateBalance: reset to the newly-computed FF_idr at every
+// rebalancing, drawn down in real time by withdrawals only (never by
+// deposits/buys/sells). The Deposit Vault is purely observational — this
+// period's raw incoming deposits, resets to 0 at every close, feeds no
+// formula. Singleton row, same pattern as SimClockState.
+// ---------------------------------------------------------------------------
+
+model IdrVaultState {
+  id              Int     @id @default(1)
+  depositVault    Decimal @default(0) @db.Decimal(30, 8)
+  withdrawalVault Decimal @default(0) @db.Decimal(30, 8)
+
+  @@map("idr_vault_state")
+}
