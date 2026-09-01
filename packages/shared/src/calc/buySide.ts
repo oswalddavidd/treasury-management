@@ -9,24 +9,31 @@ import type {
 import { statusBandFromPeak } from "./sellSide.js";
 
 export interface ComputeBuySideInput {
-  netBuy: Decimal; // NB(t), IDR
+  netBuy: Decimal; // NB(t), IDR — buy minus sell only, for display
+  withdrawalVolume: Decimal; // cumulative withdrawals since period start — added in, never netted
   ceilingIdr: Decimal; // frozen, FF_idr
   ceilingUsdt: Decimal; // real-time, IDR-denominated (USDT_avail × fx)
-  priorPeak: Decimal;
+  priorPeak: Decimal; // peak of (netBuy + withdrawalVolume) / ceilingIdr, tracked by the caller
 }
 
 /**
- * All ratios use ceilingIdr as the denominator (never the lower of the two)
- * so the denominator stays frozen and peak stays meaningful — §1.6.
+ * Buying and withdrawing draw on the same frozen IDR permission (Ceiling_idr)
+ * — a withdrawal doesn't touch USDT/LP capacity at all, but it does eat into
+ * the same 20% allowance buying does, so it's added into the same
+ * consumption figure rather than tracked as a wholly separate thing.
+ * All ratios still use ceilingIdr as the denominator (never the lower of
+ * the two ceilings) so the denominator stays frozen and peak stays
+ * meaningful — §1.6.
  */
 export function computeBuySideState(input: ComputeBuySideInput): BuySideState {
-  const { netBuy, ceilingIdr, ceilingUsdt, priorPeak } = input;
+  const { netBuy, withdrawalVolume, ceilingIdr, ceilingUsdt, priorPeak } = input;
+  const combined = netBuy.plus(withdrawalVolume);
 
-  const consumed = ceilingIdr.isZero() ? null : netBuy.div(ceilingIdr);
+  const consumed = ceilingIdr.isZero() ? null : combined.div(ceilingIdr);
   const peak = consumed === null ? priorPeak : Decimal.max(priorPeak, consumed);
 
-  const headroomIdr = ceilingIdr.minus(netBuy);
-  const headroomUsdt = ceilingUsdt.minus(netBuy);
+  const headroomIdr = ceilingIdr.minus(combined);
+  const headroomUsdt = ceilingUsdt.minus(netBuy); // withdrawals don't consume LP/USDT capacity
   const headroomEffective = Decimal.min(headroomIdr, headroomUsdt);
 
   const bindingSource: BindingSource = ceilingIdr.lte(ceilingUsdt) ? "IDR" : "USDT";
@@ -36,6 +43,7 @@ export function computeBuySideState(input: ComputeBuySideInput): BuySideState {
 
   return {
     netBuy,
+    withdrawalVolume,
     ceilingIdr,
     ceilingUsdt,
     consumed,

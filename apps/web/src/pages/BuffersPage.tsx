@@ -4,7 +4,6 @@ import { HeadlineStrip } from "../components/buffers/HeadlineStrip.js";
 import { SellSideTable } from "../components/buffers/SellSideTable.js";
 import { BuySideSection } from "../components/buffers/BuySideSection.js";
 import { LpBreakdown } from "../components/buffers/LpBreakdown.js";
-import { LaunchModeBanner } from "../components/buffers/LaunchModeBanner.js";
 
 const STALE_AFTER_MS = 15_000;
 
@@ -54,10 +53,6 @@ export default function BuffersPage() {
         <ActionBanner state={state} />
         <HeadlineStrip state={state} />
 
-        {/* launchMode (§1.7) is a banner, not a table swap — see
-            LaunchModeBanner for why. The table itself already renders "—"
-            per-coin wherever freeFloat is actually zero. */}
-        {state.launchMode && <LaunchModeBanner state={state} />}
         <SellSideTable state={state} />
         {state.buySide && (
           <BuySideSection

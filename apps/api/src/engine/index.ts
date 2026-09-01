@@ -18,8 +18,8 @@ import type { PrismaClient } from "../db.js";
 import type { Clock } from "../clock/types.js";
 import {
   getCoinNetSellTrajectory,
+  getIdrBuySideTrajectory,
   getIdrNetBuyForWindow,
-  getIdrNetBuyTrajectory,
   getLastTradePrice,
 } from "../ledger/store.js";
 import { getLatestFxRate } from "../fx/store.js";
@@ -165,7 +165,12 @@ export async function computeCurrentBufferState(
 
   const bbIdr = new Decimal(activeSnapshot.bbIdr.toString());
   const ceilingIdr = computeIdrFreeFloat(bbIdr);
-  const buyTrajectory = await getIdrNetBuyTrajectory(prisma, activeSnapshot.seqBoundary);
+  // Combined trajectory: withdrawals draw on the same frozen IDR permission
+  // as buying (§ buy-side formula, per the worked example), so peak has to
+  // be tracked on the combined figure, not netBuy alone — see
+  // getIdrBuySideTrajectory for why this can't just be two separate peaks
+  // added together.
+  const buyTrajectory = await getIdrBuySideTrajectory(prisma, activeSnapshot.seqBoundary);
   const usdtAvail = lps.reduce(
     (sum, lp) => sum.plus(lp.usdtHeld.minus(lp.usdtAllocated)),
     new Decimal(0),
@@ -174,7 +179,8 @@ export async function computeCurrentBufferState(
   const buyPriorPeak = ceilingIdr.isZero() ? new Decimal(0) : buyTrajectory.peak.div(ceilingIdr);
 
   const buySide = computeBuySideState({
-    netBuy: buyTrajectory.current,
+    netBuy: buyTrajectory.netBuy,
+    withdrawalVolume: buyTrajectory.withdrawalVolume,
     ceilingIdr,
     ceilingUsdt,
     priorPeak: buyPriorPeak,

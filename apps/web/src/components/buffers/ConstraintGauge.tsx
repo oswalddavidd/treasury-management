@@ -3,20 +3,23 @@ import { BAND_COLOR } from "./BufferGauge.js";
 
 /**
  * Buy-side constraint gauge. Fixed axis 0..ceilingIdr (never rescales
- * mid-period). Fill = NB(t). When USDT is the binding constraint, the gap
- * between ceilingUsdt and ceilingIdr renders as a grey dead zone — rupiah
- * Coinbit is permitted to convert but has no USDT liquidity behind, never
- * presented as usable headroom (§1.6).
+ * mid-period). Fill = consumedAmount — net buy PLUS withdrawal volume,
+ * since both draw on the same frozen IDR permission (must match whatever
+ * `consumed`/`peak`/`band` were actually computed from, or the fill bar and
+ * the percentage text next to it would visually disagree). When USDT is
+ * the binding constraint, the gap between ceilingUsdt and ceilingIdr
+ * renders as a grey dead zone — rupiah Coinbit is permitted to convert but
+ * has no USDT liquidity behind, never presented as usable headroom (§1.6).
  */
 export function ConstraintGauge({
-  netBuy,
+  consumedAmount,
   ceilingIdr,
   ceilingUsdt,
   peak,
   band,
   bindingSource,
 }: {
-  netBuy: number;
+  consumedAmount: number;
   ceilingIdr: number;
   ceilingUsdt: number;
   peak: number;
@@ -25,7 +28,7 @@ export function ConstraintGauge({
 }) {
   const pct = (v: number) => (ceilingIdr > 0 ? Math.max(0, Math.min(1, v / ceilingIdr)) * 100 : 0);
 
-  const fillPct = pct(Math.max(0, netBuy));
+  const fillPct = pct(Math.max(0, consumedAmount));
   const peakPct = pct(peak);
   const usdtPct = pct(ceilingUsdt);
   const hasDeadZone = bindingSource === "USDT" && ceilingUsdt < ceilingIdr;

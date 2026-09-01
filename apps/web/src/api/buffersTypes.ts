@@ -18,6 +18,7 @@ export interface CoinBufferStateDTO {
 
 export interface BuySideStateDTO {
   netBuy: string;
+  withdrawalVolume: string;
   ceilingIdr: string;
   ceilingUsdt: string;
   consumed: string | null;

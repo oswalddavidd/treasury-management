@@ -15,6 +15,7 @@ async function resetDb() {
   await prisma.lpCoinCoverage.deleteMany();
   await prisma.lpProvider.deleteMany();
   await prisma.fxRateEvent.deleteMany();
+  await prisma.idrVaultState.deleteMany();
   await prisma.simClockState.deleteMany();
   await prisma.coin.deleteMany();
   await prisma.user.deleteMany();
@@ -158,6 +159,56 @@ describe("computeCurrentBufferState", () => {
     const result = (await computeCurrentBufferState(prisma, clock)) as BufferComputedResult;
     expect(result.buySide.bindingSource).toBe("USDT");
     expect(result.buySide.unreachable.toString()).toBe("125000000"); // 200M - 75M
+  });
+
+  it("adds withdrawal volume into buy-side consumption, through the real DB path — the worked example", async () => {
+    const clock = new SimClock(new Date("2026-08-26T17:00:00.000Z"));
+
+    await appendLedgerEvent(prisma, {
+      type: "DEPOSIT_IDR",
+      userId: "user-1",
+      idrAmount: new Decimal(100_000),
+      occurredAt: clock.now(),
+    });
+    await closePeriod(prisma, clock); // BB_idr=100,000 -> ceilingIdr = FF_idr = 20,000
+
+    clock.setTime(new Date("2026-08-27T05:00:00.000Z"));
+    await setFxRate(prisma, new Decimal(15_000), clock.now());
+    await setLpState(prisma, {
+      name: "LP-A",
+      usdtHeld: new Decimal(1_000_000), // generous — not the constraint in this test
+      usdtAllocated: new Decimal(0),
+      coverage: ["BTC"],
+    });
+
+    await appendLedgerEvent(prisma, {
+      type: "BUY",
+      userId: "user-1",
+      coinId: "BTC",
+      idrAmount: new Decimal(10_000),
+      coinAmount: new Decimal(10),
+      priceIdrPerCoin: new Decimal(1_000),
+      occurredAt: clock.now(),
+    });
+
+    const afterBuy = (await computeCurrentBufferState(prisma, clock)) as BufferComputedResult;
+    expect(afterBuy.buySide.consumed?.toString()).toBe("0.5");
+
+    await appendLedgerEvent(prisma, {
+      type: "WITHDRAW_IDR",
+      userId: "user-1",
+      idrAmount: new Decimal(5_000),
+      occurredAt: clock.now(),
+    });
+
+    const afterWithdrawal = (await computeCurrentBufferState(prisma, clock)) as BufferComputedResult;
+    expect(afterWithdrawal.buySide.consumed?.toString()).toBe("0.75");
+    expect(afterWithdrawal.buySide.netBuy.toString()).toBe("10000"); // unchanged by the withdrawal
+    expect(afterWithdrawal.buySide.withdrawalVolume.toString()).toBe("5000");
+
+    // The Withdrawal Vault (separate from this consumption figure) really
+    // did get deducted — 20,000 (reset at close) - 5,000 = 15,000.
+    expect(afterWithdrawal.withdrawalVault.toString()).toBe("15000");
   });
 
   it("flags a single-source coin as a concentration risk", async () => {

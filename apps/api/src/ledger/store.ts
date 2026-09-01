@@ -100,32 +100,57 @@ export async function getCoinNetSellTrajectory(
   return { current: running, peak };
 }
 
+export interface BuySideTrajectory {
+  netBuy: Decimal; // buy - sell only, for display — a withdrawal is not a buy
+  withdrawalVolume: Decimal; // cumulative withdrawals since period start, monotonic
+  peak: Decimal; // peak of the COMBINED (netBuy + withdrawalVolume) trajectory, floored at 0
+}
+
 /**
- * NB(t) trajectory since `sinceSeq`: running buy-minus-sell value in IDR
- * across all coins (buy side is one shared buffer, not per-coin).
+ * Buying and withdrawing draw on the same frozen IDR permission, so the
+ * peak that matters for banding is the peak of the *combined* trajectory —
+ * not peak(netBuy) plus peak(withdrawalVolume) independently, since those
+ * two can peak at different moments. This walks BUY/SELL/WITHDRAW_IDR
+ * events together in seq order to get that combined peak right, while
+ * still returning netBuy and withdrawalVolume separately for display and
+ * for the USDT side (which withdrawals don't affect at all).
  */
-export async function getIdrNetBuyTrajectory(db: Db, sinceSeq: bigint): Promise<Trajectory> {
+export async function getIdrBuySideTrajectory(db: Db, sinceSeq: bigint): Promise<BuySideTrajectory> {
   const events = await db.ledgerEvent.findMany({
-    where: { seq: { gt: sinceSeq }, type: { in: ["BUY", "SELL"] } },
+    where: { seq: { gt: sinceSeq }, type: { in: ["BUY", "SELL", "WITHDRAW_IDR"] } },
     orderBy: { seq: "asc" },
     select: { type: true, idrAmount: true },
   });
 
-  let running = new Decimal(0);
+  let netBuy = new Decimal(0);
+  let withdrawalVolume = new Decimal(0);
+  let combined = new Decimal(0);
   let peak = new Decimal(0);
+
   for (const event of events) {
     const amount = new Decimal(event.idrAmount?.toString() ?? 0);
-    running = event.type === "BUY" ? running.plus(amount) : running.minus(amount);
-    if (running.gt(peak)) peak = running;
+    if (event.type === "BUY") {
+      netBuy = netBuy.plus(amount);
+      combined = combined.plus(amount);
+    } else if (event.type === "SELL") {
+      netBuy = netBuy.minus(amount);
+      combined = combined.minus(amount);
+    } else {
+      // WITHDRAW_IDR
+      withdrawalVolume = withdrawalVolume.plus(amount);
+      combined = combined.plus(amount);
+    }
+    if (combined.gt(peak)) peak = combined;
   }
-  return { current: running, peak };
+
+  return { netBuy, withdrawalVolume, peak };
 }
 
 /**
  * The IDR-value delta of BUY/SELL trades only, within (sinceSeq, uptoSeq] —
- * used both for the trailing-period launch-mode average and as the closed
- * -period equivalent of getIdrNetBuyTrajectory's `current`. Positive = net
- * buying in that window.
+ * used for the trailing-period launch-mode average (§1.7), which is
+ * deliberately scoped to trading activity only, not withdrawals. Positive
+ * = net buying in that window.
  */
 export async function getIdrNetBuyForWindow(
   db: Db,

@@ -17,13 +17,14 @@ export interface CoinBufferState {
 export type BindingSource = "IDR" | "USDT";
 
 export interface BuySideState {
-  netBuy: Decimal; // NB(t), IDR
+  netBuy: Decimal; // NB(t), IDR — buy minus sell only, for display
+  withdrawalVolume: Decimal; // cumulative withdrawals since period start — added into consumption, never netted
   ceilingIdr: Decimal; // frozen, FF_idr
   ceilingUsdt: Decimal; // real-time, IDR-denominated
-  consumed: Decimal | null; // NB/ceilingIdr; null when ceilingIdr == 0
+  consumed: Decimal | null; // (netBuy + withdrawalVolume) / ceilingIdr; null when ceilingIdr == 0
   peak: Decimal;
-  headroomIdr: Decimal;
-  headroomUsdt: Decimal;
+  headroomIdr: Decimal; // ceilingIdr - (netBuy + withdrawalVolume) — withdrawals draw on the same IDR permission as buying
+  headroomUsdt: Decimal; // ceilingUsdt - netBuy — withdrawals don't consume LP/USDT execution capacity
   headroomEffective: Decimal; // min(headroomIdr, headroomUsdt)
   bindingSource: BindingSource;
   unreachable: Decimal; // max(0, ceilingIdr - ceilingUsdt) — dead zone, never headroom
